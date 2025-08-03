@@ -6,6 +6,7 @@
   "scripts": {
     "test": "playwright test",
     "scrape:connections": "playwright test tests/scrapers/connections.spec.ts --project=scrape",
+    "scrape:connections-via-pagination": "playwright test tests/scrapers/search-filters-pagination.spec.ts --project=scrape --timeout=500000",
     "codegen": "playwright codegen --save-storage=playwright/.auth/linkedin.json",
     "lint": "echo \"No linter configured\""
   },

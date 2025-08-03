@@ -62,12 +62,17 @@ Before running the scraper, you need to authenticate with LinkedIn:
 
 ### Quick Start
 
-Run the scraper with:
+Run the scraper using npm script (Recommended):
+```bash
+npm run scrape:connections-via-pagination
+```
+
+Or run directly with Playwright:
 ```bash
 npx playwright test tests/scrapers/search-filters-pagination.spec.ts --project=scrape
 ```
 
-### With Extended Timeout (Recommended for large datasets)
+### With Extended Timeout (for large datasets)
 
 ```bash
 npx playwright test tests/scrapers/search-filters-pagination.spec.ts --project=scrape --timeout=300000
