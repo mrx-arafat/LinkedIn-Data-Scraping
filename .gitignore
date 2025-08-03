@@ -23,7 +23,7 @@ test-results/
 
 # Environment
 .env
-.env.*
+
 
 # VS Code
 .vscode/
@@ -60,7 +60,6 @@ $RECYCLE.BIN/
 # Ignore output CSV/JSON files
 dump.csv
 dump.json
-*.csv
-*.json
+
 !output/*.csv
 !output/*.json
