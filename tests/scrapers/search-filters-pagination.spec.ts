@@ -7,37 +7,47 @@ import { saveCSV, saveJSON } from '../../src/utils/save';
 test.describe('LinkedIn Search Filters Pagination', () => {
   test.setTimeout(10 * 60 * 1000);
 
-  test('scrape search results from first page', async ({ page }) => {
+  test('scrape all search results across all pages', async ({ page }) => {
     // Navigate directly to the search results page (1st degree connections)
     await page.goto('https://www.linkedin.com/search/results/people/?network=%5B%22F%22%5D&origin=MEMBER_PROFILE_CANNED_SEARCH');
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
     await expect(page.locator('main')).toBeVisible();
 
-    // Wait for search results to load
-    await page.waitForSelector('.search-results-container', { timeout: 10000 });
-
-    // Get the first ul containing search results
-    const resultsContainer = page.locator('.search-results-container ul').first();
-    await expect(resultsContainer).toBeVisible();
-
-    // Get all li elements that contain profile data (identified by data-chameleon-result-urn)
-    const resultItems = resultsContainer.locator('li').filter({ has: page.locator('[data-chameleon-result-urn]') });
-    const count = await resultItems.count();
-    console.log(`Found ${count} result items`);
-
-    // Extract data from first 10 results
-    const results: Array<{
+    // Initialize results array and tracking variables
+    const allResults: Array<{
       name: string;
       headline: string;
       username: string;
       profileUrl: string;
       imageUrl?: string | null;
     }> = [];
+    const processedUsernames = new Set<string>();
+    let currentPage = 1;
+    let hasNextPage = true;
+    const maxPages = 100; // Safety limit to prevent infinite loops
 
-    const maxResults = Math.min(10, count);
+    // Main pagination loop
+    while (hasNextPage && currentPage <= maxPages) {
+      console.log(`\nProcessing page ${currentPage}...`);
 
-    for (let i = 0; i < maxResults; i++) {
+      // Wait for search results to load
+      await page.waitForSelector('.search-results-container', { timeout: 10000 });
+
+      // Get the first ul containing search results
+      const resultsContainer = page.locator('.search-results-container ul').first();
+      await expect(resultsContainer).toBeVisible();
+
+      // Get all li elements that contain profile data (identified by data-chameleon-result-urn)
+      const resultItems = resultsContainer.locator('li').filter({ has: page.locator('[data-chameleon-result-urn]') });
+      const count = await resultItems.count();
+      console.log(`Found ${count} result items on page ${currentPage}`);
+
+      // Extract data from all results on this page
+      const pageResults: typeof allResults = [];
+
+      // Process all results on this page
+      for (let i = 0; i < count; i++) {
       const item = resultItems.nth(i);
 
       try {
@@ -91,36 +101,76 @@ test.describe('LinkedIn Search Filters Pagination', () => {
           }
         }
 
-        // Only add if we have at least a name
-        if (name) {
-          results.push({
+        // Only add if we have at least a name and not already processed
+        if (name && !processedUsernames.has(username)) {
+          pageResults.push({
             name,
             headline,
             username,
             profileUrl: profileUrl.startsWith('http') ? profileUrl : `https://www.linkedin.com${profileUrl}`,
             imageUrl
           });
+          processedUsernames.add(username);
         }
       } catch (error) {
-        console.error(`Error processing item ${i}:`, error);
+        console.error(`Error processing item ${i} on page ${currentPage}:`, error);
+      }
+      }
+
+      // Add page results to all results
+      allResults.push(...pageResults);
+      console.log(`Scraped ${pageResults.length} profiles from page ${currentPage}. Total so far: ${allResults.length}`);
+
+      // Check if there's a next page
+      const nextButton = page.locator('button[aria-label="Next"]').first();
+      const isNextDisabled = await nextButton.evaluate(el =>
+        el.hasAttribute('disabled') || el.classList.contains('artdeco-button--disabled')
+      );
+
+      if (!isNextDisabled && currentPage < maxPages) {
+        // Click next and wait for navigation
+        await nextButton.click();
+        currentPage++;
+
+        // Wait for the page to update
+        await page.waitForTimeout(2000);
+
+        // Wait for the new results to load
+        await page.waitForSelector('.search-results-container', { timeout: 10000 });
+
+        // Optional: wait for the page number to update in the pagination
+        try {
+          await page.waitForFunction(
+            (pageNum) => {
+              const pageState = document.querySelector('.artdeco-pagination__page-state');
+              return pageState && pageState.textContent?.includes(`Page ${pageNum}`);
+            },
+            currentPage,
+            { timeout: 5000 }
+          );
+        } catch (e) {
+          console.log('Page state update not detected, continuing anyway...');
+        }
+      } else {
+        hasNextPage = false;
+        console.log('No more pages to process or reached max pages limit.');
       }
     }
 
-    // Save results to files
+    // Save all results to files
     const OUT_DIR = path.resolve(process.cwd(), 'output');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
     const jsonPath = path.join(OUT_DIR, `search-results-${timestamp}.json`);
     const csvPath = path.join(OUT_DIR, `search-results-${timestamp}.csv`);
 
-    saveJSON(jsonPath, results);
-    saveCSV(csvPath, results);
+    saveJSON(jsonPath, allResults);
+    saveCSV(csvPath, allResults);
 
-    console.log(`Scraped ${results.length} profiles`);
+    console.log(`\nTotal profiles scraped: ${allResults.length} from ${currentPage} pages`);
     console.log('Results saved to:', { jsonPath, csvPath });
 
     // Verify we got results
-    expect(results.length).toBeGreaterThan(0);
-    expect(results.length).toBeLessThanOrEqual(10);
+    expect(allResults.length).toBeGreaterThan(0);
   });
 });
