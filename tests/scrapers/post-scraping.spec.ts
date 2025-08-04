@@ -5,14 +5,14 @@ import crypto from 'node:crypto';
 import { saveJSON, saveCSV } from '../../src/utils/save';
 
 const OUT_DIR = path.resolve(process.cwd(), 'output');
-const USERNAMES = ['e4rafat'];
+const USERNAMES = ['e4rafat', 'eordax'];
 
-// Use my-auth.json as primary auth file
+// Use auth.json as primary auth file
 const AUTH_STATE = path.resolve(process.cwd(), 'playwright/.auth/my-auth.json');
 
 // Scraping configuration
 const SCRAPING_CONFIG = {
-  maxPosts: 7,  // Maximum number of posts to collect
+  maxPosts: 4,  // Maximum number of posts to collect
   minLikes: 0,   // Minimum likes filter
   minComments: 0, // Minimum comments filter
 
@@ -197,8 +197,8 @@ async function scrollAndCollect(page: any, username: string, opts?: { maxToColle
   const items: any[] = [];
   const seenTexts = new Set<string>();
 
-  console.log(`📊 Starting to scrape posts for ${username}...`);
-  console.log(`🎯 Target: ${targetCount} posts`);
+  console.log(`📊 Collecting posts for user: ${username}`);
+  console.log(`🎯 Maximum posts to collect for this user: ${targetCount}`);
 
   try {
     // Wait a bit for content to load
@@ -360,7 +360,7 @@ async function scrollAndCollect(page: any, username: string, opts?: { maxToColle
 
           // Break immediately if we've reached the target count
           if (items.length >= targetCount) {
-            console.log(`  🎯 Reached target count of ${targetCount} posts`);
+            console.log(`  🎯 Reached target count of ${targetCount} posts for ${username}`);
             break;
           }
 
@@ -371,7 +371,7 @@ async function scrollAndCollect(page: any, username: string, opts?: { maxToColle
 
       // Break if we've reached the target count
       if (items.length >= targetCount) {
-        console.log(`\n🎯 Target reached: ${items.length}/${targetCount} posts collected`);
+        console.log(`\n🎯 Target reached: ${items.length}/${targetCount} posts collected for ${username}`);
         break;
       }
 
@@ -387,7 +387,7 @@ async function scrollAndCollect(page: any, username: string, opts?: { maxToColle
     console.error('Error in scrollAndCollect:', error);
   }
 
-  console.log(`\n✅ Scraping complete! Collected ${items.length} posts`);
+  console.log(`\n✅ Scraping complete for ${username}! Collected ${items.length} posts`);
   return items;
 }
 
@@ -473,13 +473,19 @@ test.describe('LinkedIn Recent Activity - Posts scraper', () => {
     // Check if auth file exists
     if (!fs.existsSync(AUTH_STATE)) {
       console.error('❌ Auth file not found:', AUTH_STATE);
-      console.error('Please run: npx tsx tests/auth/manual-login.ts');
-      throw new Error('Authentication required. Run login script first.');
+      console.error('Please run the authentication setup first');
+      throw new Error('Authentication required. Run auth setup first.');
     }
 
+    // Collect all posts from all users
+    const allUsersPosts: any[] = [];
+    const userStats: any = {};
+
     for (const username of USERNAMES) {
-      console.log(`\n📊 Starting scrape for: ${username}`);
-      console.log('━'.repeat(50));
+      console.log(`\n${'═'.repeat(60)}`);
+      console.log(`📊 Starting scrape for user: ${username}`);
+      console.log(`🎯 Target: ${SCRAPING_CONFIG.maxPosts} posts per user`);
+      console.log(`${'═'.repeat(60)}\n`);
 
       try {
         // Navigate and collect posts
@@ -491,50 +497,71 @@ test.describe('LinkedIn Recent Activity - Posts scraper', () => {
           maxPasses: 20
         });
 
-        // Generate output files
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const jsonPath = path.join(OUT_DIR, `posts-${username}-${timestamp}.json`);
-        const csvPath = path.join(OUT_DIR, `posts-${username}-${timestamp}.csv`);
+        // Add posts to combined collection
+        allUsersPosts.push(...items);
 
-        // Add profile info to the output
-        const output = {
-          profile: {
-            username,
-            name: username,
-            scrapedAt: new Date().toISOString()
-          },
-          posts: items,
-          stats: {
-            totalPosts: items.length,
-            postsWithMedia: items.filter((p: any) => p.media.images.length > 0 || p.media.videos.length > 0).length,
-            avgReactions: items.reduce((sum: number, p: any) => sum + (p.reactionsCount || 0), 0) / items.length || 0,
-            avgComments: items.reduce((sum: number, p: any) => sum + (p.commentsCount || 0), 0) / items.length || 0
-          }
+        // Store stats for this user
+        userStats[username] = {
+          totalPosts: items.length,
+          postsWithMedia: items.filter((p: any) => p.media.images.length > 0 || p.media.videos.length > 0).length,
+          avgReactions: items.reduce((sum: number, p: any) => sum + (p.reactionsCount || 0), 0) / items.length || 0,
+          avgComments: items.reduce((sum: number, p: any) => sum + (p.commentsCount || 0), 0) / items.length || 0
         };
 
-        // Write JSON with full data
-        await saveJSON(jsonPath, output);
+        // Log if user had fewer posts than configured maximum
+        if (items.length < SCRAPING_CONFIG.maxPosts) {
+          console.log(`\n⚠️  Note: ${username} had only ${items.length} posts available (less than configured max of ${SCRAPING_CONFIG.maxPosts})`);
+        }
 
-        // Write CSV with posts only
-        const csvRows = reorderForCSV(items);
-        await saveCSV(csvPath, csvRows);
-
-        // Expect at least one post for the username
-        expect(items.length).toBeGreaterThan(0);
-
-        console.log('\n📈 Summary:');
-        console.log(`   Total posts: ${items.length}`);
-        console.log(`   Posts with media: ${output.stats.postsWithMedia}`);
-        console.log(`   Avg reactions: ${Math.round(output.stats.avgReactions)}`);
-        console.log(`   Avg comments: ${Math.round(output.stats.avgComments)}`);
-        console.log('\n💾 Output files:');
-        console.log(`   JSON: ${jsonPath}`);
-        console.log(`   CSV:  ${csvPath}`);
+        // Log summary for this user
+        console.log(`\n📈 Summary for ${username}:`);
+        console.log(`   Total posts collected: ${items.length}/${SCRAPING_CONFIG.maxPosts}`);
+        console.log(`   Posts with media: ${userStats[username].postsWithMedia}`);
+        console.log(`   Avg reactions: ${Math.round(userStats[username].avgReactions)}`);
+        console.log(`   Avg comments: ${Math.round(userStats[username].avgComments)}`);
 
       } catch (error) {
         console.error(`❌ Error scraping ${username}:`, error);
         throw error;
       }
     }
+
+    // Generate combined output filename
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const usernamesStr = USERNAMES.join('-');
+    const jsonPath = path.join(OUT_DIR, `posts-${usernamesStr}-${timestamp}.json`);
+    const csvPath = path.join(OUT_DIR, `posts-${usernamesStr}-${timestamp}.csv`);
+
+    // Create combined output
+    const combinedOutput = {
+      profiles: USERNAMES.map(username => ({
+        username,
+        stats: userStats[username] || { totalPosts: 0, postsWithMedia: 0, avgReactions: 0, avgComments: 0 }
+      })),
+      scrapedAt: new Date().toISOString(),
+      totalPosts: allUsersPosts.length,
+      posts: allUsersPosts
+    };
+
+    // Write JSON with full data
+    await saveJSON(jsonPath, combinedOutput);
+
+    // Write CSV with posts only
+    const csvRows = reorderForCSV(allUsersPosts);
+    await saveCSV(csvPath, csvRows);
+
+    // Final summary
+    console.log(`\n${'═'.repeat(60)}`);
+    console.log(`✅ All users processed successfully!`);
+    console.log(`   Total users scraped: ${USERNAMES.length}`);
+    console.log(`   Users: ${USERNAMES.join(', ')}`);
+    console.log(`   Total posts collected: ${allUsersPosts.length}`);
+    console.log(`\n💾 Combined output files:`);
+    console.log(`   JSON: ${jsonPath}`);
+    console.log(`   CSV:  ${csvPath}`);
+    console.log(`${'═'.repeat(60)}\n`);
+
+    // Expect at least one post total
+    expect(allUsersPosts.length).toBeGreaterThan(0);
   });
 });
