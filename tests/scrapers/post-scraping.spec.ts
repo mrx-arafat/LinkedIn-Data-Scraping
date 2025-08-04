@@ -12,9 +12,10 @@ const AUTH_STATE = path.resolve(process.cwd(), 'playwright/.auth/my-auth.json');
 
 // Scraping configuration
 const SCRAPING_CONFIG = {
-  maxPosts: 10,  // Maximum number of posts to collect
+  maxPosts: 7,  // Maximum number of posts to collect
   minLikes: 0,   // Minimum likes filter
   minComments: 0, // Minimum comments filter
+
   withMediaOnly: false, // Only posts with media
   withoutMediaOnly: false, // Only posts without media
   keyword: '', // Keyword filter for post text
@@ -357,9 +358,21 @@ async function scrollAndCollect(page: any, username: string, opts?: { maxToColle
           items.push(post);
           console.log(`  ✅ Collected post ${items.length}: "${post.postText.substring(0, 50)}..."`);
 
+          // Break immediately if we've reached the target count
+          if (items.length >= targetCount) {
+            console.log(`  🎯 Reached target count of ${targetCount} posts`);
+            break;
+          }
+
         } catch (err) {
-          console.log(`  ⚠️ Error processing post ${i}:`, err.message);
+          console.log(`  ⚠️ Error processing post ${i}:`, err instanceof Error ? err.message : String(err));
         }
+      }
+
+      // Break if we've reached the target count
+      if (items.length >= targetCount) {
+        console.log(`\n🎯 Target reached: ${items.length}/${targetCount} posts collected`);
+        break;
       }
 
       // Scroll to load more
@@ -472,9 +485,9 @@ test.describe('LinkedIn Recent Activity - Posts scraper', () => {
         // Navigate and collect posts
         await navigateToRecentActivityAll(page, username);
 
-        // Collect posts - simplified approach
+        // Collect posts - use configuration
         const items = await scrollAndCollect(page, username, {
-          maxToCollect: 10,  // Just get first 10 posts
+          maxToCollect: SCRAPING_CONFIG.maxPosts,  // Use configured max posts
           maxPasses: 20
         });
 
