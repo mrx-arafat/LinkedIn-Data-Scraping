@@ -327,14 +327,81 @@ async function scrollAndCollect(page: any, username: string, opts?: { maxToColle
             for (const sel of authorSelectors) {
               const authorEl = el.querySelector(sel);
               if (authorEl && authorEl.innerText) {
-                author = authorEl.innerText.trim();
-                break;
+                const rawText = authorEl.innerText.trim();
+                // Clean up the author name
+                // Remove duplicates, connection degrees, and premium badges
+                const lines = rawText.split('\n').map((line: string) => line.trim()).filter((line: string) => line);
+
+                // Find the actual name (usually the first non-empty line that's not a badge)
+                for (const line of lines) {
+                  // Skip lines that are connection degrees or badges
+                  if (line.match(/^(Premium|Verified|•|1st|2nd|3rd\+?)$/i)) continue;
+                  if (line.includes('•')) {
+                    // If line contains bullet, take the part before it
+                    const namePart = line.split('•')[0].trim();
+                    if (namePart && !namePart.match(/^(Premium|Verified|1st|2nd|3rd\+?)$/i)) {
+                      author = namePart;
+                      break;
+                    }
+                  } else if (!line.match(/^(You|Premium|Verified|1st|2nd|3rd\+?)$/i)) {
+                    author = line;
+                    break;
+                  }
+                }
+
+                // If we found a name, break
+                if (author) break;
               }
             }
 
-            // Get timestamp
-            const timeElement = el.querySelector('time');
-            const timestamp = timeElement ? timeElement.innerText.trim() : '';
+            // Get posted time (e.g., "20m", "4hr", "2d")
+            let postedTime = '';
+
+            // Try to find time in sub-description
+            const subDescEl = el.querySelector('.update-components-actor__sub-description');
+            if (subDescEl) {
+              const timeText = subDescEl.innerText || subDescEl.textContent || '';
+              // Extract time pattern like "20m", "4hr", "2d", "1w", "9mo", "1yr"
+              const timeMatch = timeText.match(/(\d+\s*(?:m(?:in)?|h(?:r)?|d(?:ay)?s?|w(?:eek)?s?|mo(?:nth)?s?|y(?:r|ear)?s?))\s*(?:ago|•)/i);
+              if (timeMatch) {
+                postedTime = timeMatch[1].replace(/\s+/g, '');
+              }
+            }
+
+            // Try time element if not found
+            if (!postedTime) {
+              const timeEl = el.querySelector('time');
+              if (timeEl) {
+                const timeText = timeEl.innerText || timeEl.textContent || '';
+                // Try to extract time pattern
+                const timeMatch = timeText.match(/(\d+\s*(?:m(?:in)?|h(?:r)?|d(?:ay)?s?|w(?:eek)?s?|mo(?:nth)?s?|y(?:r|ear)?s?))/i);
+                if (timeMatch) {
+                  postedTime = timeMatch[1].replace(/\s+/g, '');
+                } else {
+                  postedTime = timeText.trim();
+                }
+              }
+            }
+
+            // Try aria-label on any element
+            if (!postedTime) {
+              const elementsWithAriaLabel = el.querySelectorAll('[aria-label]');
+              for (const elem of elementsWithAriaLabel) {
+                const ariaLabel = elem.getAttribute('aria-label') || '';
+                if (ariaLabel.includes('ago')) {
+                  const timeMatch = ariaLabel.match(/(\d+\s*(?:m(?:in)?|h(?:r)?|d(?:ay)?s?|w(?:eek)?s?|mo(?:nth)?s?|y(?:r|ear)?s?))\s*ago/i);
+                  if (timeMatch) {
+                    postedTime = timeMatch[1].replace(/\s+/g, '');
+                    break;
+                  }
+                }
+              }
+            }
+
+            // Final fallback
+            if (!postedTime) {
+              postedTime = 'Unknown';
+            }
 
             // Get reactions
             const reactionSelectors = [
@@ -384,7 +451,7 @@ async function scrollAndCollect(page: any, username: string, opts?: { maxToColle
             return {
               text,
               author,
-              timestamp,
+              postedTime,
               reactions,
               comments,
               images,
@@ -411,7 +478,8 @@ async function scrollAndCollect(page: any, username: string, opts?: { maxToColle
             authorUsername: username,
             postUrl: postData.postId ? `https://www.linkedin.com/feed/update/urn:li:activity:${postData.postId}/` : null,
             postText: postData.text,
-            timestamp: postData.timestamp || new Date().toISOString(),
+            postedTime: postData.postedTime || 'Unknown',
+            scrapedAt: new Date().toISOString(),
             reactionsCount: postData.reactions,
             commentsCount: postData.comments,
             repostsCount: 0,
@@ -465,7 +533,8 @@ function reorderForCSV(rows: any[]) {
     'authorFollowers',
     'postId',
     'postUrl',
-    'timestamp',
+    'postedTime',
+    'scrapedAt',
     'postText',
     'reactionsCount',
     'commentsCount',
@@ -487,7 +556,8 @@ function reorderForCSV(rows: any[]) {
       authorFollowers: r.authorFollowers ?? '',
       postId: r.postId ?? '',
       postUrl: r.postUrl ?? '',
-      timestamp: r.timestamp ?? '',
+      postedTime: r.postedTime ?? '',
+      scrapedAt: r.scrapedAt ?? '',
       postText: r.postText ?? '',
       reactionsCount: r.reactionsCount ?? '',
       commentsCount: r.commentsCount ?? '',
