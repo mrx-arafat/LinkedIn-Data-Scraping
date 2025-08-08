@@ -5,14 +5,28 @@ import crypto from 'node:crypto';
 import { saveJSON, saveCSV } from '../../src/utils/save';
 
 const OUT_DIR = path.resolve(process.cwd(), 'output');
-const USERNAMES = ['e4rafat', 'eordax'];
+const USERNAMES = [
+  'jaindl',
+  'theanishajain',
+  'theadampeng',
+  'jessectchan',
+  'charlie-hills',
+  'laraacostar',
+  'mischa-collins',
+  'ayesha-ameer',
+  'marina-panova',
+  'daniel-korenblum',
+  'celesteyamile',
+  'contentkuba'
+];
+
 
 // Use auth.json as primary auth file
 const AUTH_STATE = path.resolve(process.cwd(), 'playwright/.auth/my-auth.json');
 
 // Scraping configuration
 const SCRAPING_CONFIG = {
-  maxPosts: 4,  // Maximum number of posts to collect
+  maxPosts: 10,  // Maximum number of posts to collect
   minLikes: 0,   // Minimum likes filter
   minComments: 0, // Minimum comments filter
 
@@ -82,6 +96,58 @@ async function getProfileInfo(page: any) {
   } catch (e) {
     console.error('Error getting profile info:', e);
     return { name: '', photo: '' };
+  }
+}
+
+async function getFollowersCount(page: any, username: string): Promise<string> {
+  try {
+    console.log(`📊 Getting followers count for ${username}...`);
+
+    // Navigate to profile page first
+    const profileUrl = `https://www.linkedin.com/in/${username}/`;
+    await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    // Wait for page to load
+    await page.waitForSelector('main', { timeout: 10000 });
+
+    // Multiple selectors for followers count
+    const followersSelectors = [
+      // Activity section followers
+      '.pvs-header__optional-link:has-text("followers")',
+      'p:has-text("followers")',
+      // Profile header followers
+      '.text-body-small:has-text("followers")',
+      // Generic followers text
+      '[aria-label*="followers"]',
+      'span:has-text("followers")'
+    ];
+
+    let followersText = '';
+    for (const selector of followersSelectors) {
+      try {
+        const element = page.locator(selector).first();
+        if (await element.isVisible({ timeout: 3000 }).catch(() => false)) {
+          followersText = await element.innerText();
+          if (followersText && followersText.includes('followers')) {
+            break;
+          }
+        }
+      } catch (e) {
+        // Continue to next selector
+      }
+    }
+
+    // Extract number from text like "69,118 followers"
+    const match = followersText.match(/([\d,]+)\s*followers/i);
+    if (match) {
+      return match[1]; // Return the number with commas
+    }
+
+    console.log('⚠️  Could not find followers count');
+    return '0';
+  } catch (error) {
+    console.error('Error getting followers count:', error);
+    return '0';
   }
 }
 
@@ -396,6 +462,7 @@ function reorderForCSV(rows: any[]) {
   const headers = [
     'authorName',
     'authorUsername',
+    'authorFollowers',
     'postId',
     'postUrl',
     'timestamp',
@@ -417,6 +484,7 @@ function reorderForCSV(rows: any[]) {
     return {
       authorName: r.authorName ?? '',
       authorUsername: r.authorUsername ?? '',
+      authorFollowers: r.authorFollowers ?? '',
       postId: r.postId ?? '',
       postUrl: r.postUrl ?? '',
       timestamp: r.timestamp ?? '',
@@ -488,6 +556,10 @@ test.describe('LinkedIn Recent Activity - Posts scraper', () => {
       console.log(`${'═'.repeat(60)}\n`);
 
       try {
+        // Get followers count first
+        const followersCount = await getFollowersCount(page, username);
+        console.log(`👥 Followers: ${followersCount}`);
+
         // Navigate and collect posts
         await navigateToRecentActivityAll(page, username);
 
@@ -497,11 +569,16 @@ test.describe('LinkedIn Recent Activity - Posts scraper', () => {
           maxPasses: 20
         });
 
-        // Add posts to combined collection
-        allUsersPosts.push(...items);
+        // Add posts to combined collection with followers info
+        const postsWithFollowers = items.map((post: any) => ({
+          ...post,
+          authorFollowers: followersCount
+        }));
+        allUsersPosts.push(...postsWithFollowers);
 
         // Store stats for this user
         userStats[username] = {
+          followers: followersCount,
           totalPosts: items.length,
           postsWithMedia: items.filter((p: any) => p.media.images.length > 0 || p.media.videos.length > 0).length,
           avgReactions: items.reduce((sum: number, p: any) => sum + (p.reactionsCount || 0), 0) / items.length || 0,
@@ -515,6 +592,7 @@ test.describe('LinkedIn Recent Activity - Posts scraper', () => {
 
         // Log summary for this user
         console.log(`\n📈 Summary for ${username}:`);
+        console.log(`   Followers: ${userStats[username].followers}`);
         console.log(`   Total posts collected: ${items.length}/${SCRAPING_CONFIG.maxPosts}`);
         console.log(`   Posts with media: ${userStats[username].postsWithMedia}`);
         console.log(`   Avg reactions: ${Math.round(userStats[username].avgReactions)}`);
